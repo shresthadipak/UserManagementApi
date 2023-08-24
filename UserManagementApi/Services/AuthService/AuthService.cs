@@ -2,6 +2,7 @@
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Text;
 using UserManagementApi.Models;
 
@@ -20,14 +21,26 @@ namespace UserManagementApi.Services.AuthService
             _configuration = configuration;
         }
 
-        public async Task<(int, string)> Login(LoginModel model)
+        public async Task<TokenViewModel> Login(LoginModel model)
         {
+            TokenViewModel tokenViewModel = new();
+
             var user = await userManager.FindByNameAsync(model.Username);
             if (user == null)
-                return (0, "Invalid username!");
+            {
+                tokenViewModel.StatusCode = 0;
+                tokenViewModel.StatusMessage = "Invalid username!";
+                return tokenViewModel;
+            }
+                
 
             if (!await userManager.CheckPasswordAsync(user, model.Password))
-                return (0, "Wrong password!");
+            {
+                tokenViewModel.StatusCode = 0;
+                tokenViewModel.StatusMessage = "Wrong Password!";
+                return tokenViewModel;
+            }
+                
 
             var userRoles = await userManager.GetRolesAsync(user);
 
@@ -42,9 +55,17 @@ namespace UserManagementApi.Services.AuthService
                 authClaims.Add(new Claim(ClaimTypes.Role, userRole));
             }
 
-            string token = GenerateToken(authClaims);
+            tokenViewModel.AccessToken = GenerateToken(authClaims);
+            tokenViewModel.RefreshToken = GenerateRefreshToken();
+            tokenViewModel.StatusCode = 1;
+            tokenViewModel.StatusMessage = "Success";
 
-            return (1, token);
+            var _RefreshTokenValidityInDays = Convert.ToInt64(_configuration["JWTKey:RefreshTokenValidityInDays"]);
+            user.RefreshToken = tokenViewModel.RefreshToken;
+            user.RefreshTokenExpiryTime = DateTime.Now.AddDays(_RefreshTokenValidityInDays);
+            await userManager.UpdateAsync(user);
+
+            return tokenViewModel;
         }
 
         public async Task<(int, string)> Registration(RegistrationModel model, string role)
@@ -76,6 +97,43 @@ namespace UserManagementApi.Services.AuthService
             return (1, "User created successfully!");
         }
 
+
+        public async Task<TokenViewModel> GetRefreshToken(GetRefreshTokenViewModel model)
+        {
+            TokenViewModel tokenViewModel = new();
+            var principal = GetPrincipalFromExpiredToken(model.AccessToken);
+            string username = principal.Identity.Name;
+            var user = await userManager.FindByNameAsync(username);
+
+            if (user == null || user.RefreshToken != model.RefreshToken || user.RefreshTokenExpiryTime <= DateTime.Now)
+            {
+                tokenViewModel.StatusCode = 0;
+                tokenViewModel.StatusMessage = "Invalid access token or refresh token";
+                return tokenViewModel;
+            }
+
+            var authClaims = new List<Claim>
+            {
+                new Claim(ClaimTypes.Name, user.UserName),
+                new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
+            };
+
+            var newAccessToken = GenerateToken(authClaims);
+            var newRefreshToken = GenerateRefreshToken();
+
+            user.RefreshToken = newRefreshToken;
+            await userManager.UpdateAsync(user);
+
+            tokenViewModel.StatusCode = 1;
+            tokenViewModel.StatusMessage = "Success";
+            tokenViewModel.AccessToken = newAccessToken;
+            tokenViewModel.RefreshToken = newRefreshToken;
+
+            return tokenViewModel;
+
+        }
+
+
         public string GenerateToken(IEnumerable<Claim> claims)
         {
             var authSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_configuration["JWTKey:Secret"]));
@@ -94,5 +152,35 @@ namespace UserManagementApi.Services.AuthService
 
             return tokenHandler.WriteToken(token);
         }
+
+
+        private static string GenerateRefreshToken()
+        {
+            var randomNumber = new byte[64];
+            using var rng = RandomNumberGenerator.Create();
+            rng.GetBytes(randomNumber);
+            return Convert.ToBase64String(randomNumber);
+        }
+
+
+        private ClaimsPrincipal GetPrincipalFromExpiredToken(string? token)
+        {
+            var tokenValidatedParameters = new TokenValidationParameters
+            {
+                ValidateAudience = false,
+                ValidateIssuer = false,
+                ValidateIssuerSigningKey = true,
+                IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_configuration["JWTKey:Secret"])),
+                ValidateLifetime = false
+            };
+
+            var tokenHandler = new JwtSecurityTokenHandler();
+            var principal = tokenHandler.ValidateToken(token, tokenValidatedParameters, out SecurityToken securityToken);
+            if (securityToken is not JwtSecurityToken jwtSecurityToken || !jwtSecurityToken.Header.Alg.Equals(SecurityAlgorithms.HmacSha256, StringComparison.InvariantCultureIgnoreCase))
+                throw new SecurityTokenException("Invalid token");
+
+            return principal;
+        }
+
     }
 }

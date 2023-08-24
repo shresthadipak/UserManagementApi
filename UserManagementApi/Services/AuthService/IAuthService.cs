@@ -6,6 +6,8 @@ namespace UserManagementApi.Services.AuthService
     {
         Task<(int, string)> Registration(RegistrationModel model, string role);
 
-        Task<(int, string)> Login(LoginModel model);
+        Task<TokenViewModel> Login(LoginModel model);
+
+        Task<TokenViewModel> GetRefreshToken(GetRefreshTokenViewModel model);
     }
 }

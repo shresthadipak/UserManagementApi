@@ -27,11 +27,11 @@ namespace UserManagementApi.Controllers
                 if (!ModelState.IsValid)
                     return BadRequest("Invalid payload!");
 
-                var (status, message) = await _authService.Login(model);
-                if (status == 0)
-                    return BadRequest(message);
+                var result = await _authService.Login(model);
+                if (result.StatusCode == 0)
+                    return BadRequest(result.StatusMessage);
 
-                return Ok(message);
+                return Ok(result);
 
             }
             catch (Exception ex)
@@ -42,8 +42,7 @@ namespace UserManagementApi.Controllers
         }
 
 
-        [HttpPost]
-        [Route("registration")]
+        [HttpPost("registration")]
         public async Task<IActionResult> Register(RegistrationModel model)
         {
             try
