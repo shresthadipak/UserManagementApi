@@ -80,7 +80,11 @@ namespace UserManagementApi.Services.AuthService
                 SecurityStamp = Guid.NewGuid().ToString(),
                 UserName = model.Username,
                 Firstname = model.Firstname,
-                Lastname = model.Lastname
+                Lastname = model.Lastname,
+
+                // Set a default refresh token (you can generate this value)
+                RefreshToken = Guid.NewGuid().ToString(),
+                RefreshTokenExpiryTime = DateTime.UtcNow.AddHours(1) // Set an expiry time
             };
 
             var createUser = await userManager.CreateAsync(user, model.Password);

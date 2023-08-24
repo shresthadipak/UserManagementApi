@@ -50,7 +50,7 @@ namespace UserManagementApi.Controllers
                 if (!ModelState.IsValid)
                     return BadRequest("Invalid payload");
 
-                var (status, message) = await _authService.Registration(model, UserRoles.Admin);
+                var (status, message) = await _authService.Registration(model, (model.Role == "Admin")? UserRoles.Admin: UserRoles.User);
 
                 if (status == 0)
                 {
